@@ -19,7 +19,7 @@ body{background:var(--bg);color:var(--text);font-family:'Apple SD Gothic Neo','M
 .header p{color:var(--sub);font-size:0.8rem;margin-top:4px;}
 .card{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
 .card-title{font-size:0.75rem;color:var(--sub);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;}
-.strategy-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+.strategy-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .strat-btn{background:var(--accent2);border:2px solid transparent;border-radius:10px;
   color:var(--text);padding:10px 4px;font-size:0.8rem;text-align:center;
   cursor:pointer;line-height:1.4;transition:all 0.2s;width:100%;}
@@ -83,6 +83,10 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
       <button class="strat-btn active" id="btnWeighted">빈도<br>가중치</button>
       <button class="strat-btn" id="btnTopHeavy">상위<br>집중형</button>
       <button class="strat-btn" id="btnMixed">혼합형</button>
+      <button class="strat-btn" id="btnUnpopular">비인기<br>가중치</button>
+    </div>
+    <div id="stratDesc" style="margin-top:10px;font-size:0.75rem;color:var(--sub);line-height:1.5;">
+      많이 나온 번호일수록 뽑힐 확률이 높아집니다.
     </div>
   </div>
 
@@ -102,7 +106,7 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
 
 <div id="tab-freq" class="section">
   <div class="card">
-    <div class="card-title">상위 20 번호 출현 빈도 (50회차 기준)</div>
+    <div class="card-title">번호별 출현 빈도 — 실제 1~1204회차 (2002.12~2025.12)</div>
     <div class="freq-list" id="freqList"></div>
   </div>
 </div>
@@ -120,40 +124,34 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
     el.style.display = "block";
   }
 
-  // ── 데이터 ────────────────────────────────────────────
-  var SAMPLE = [
-    [3,7,16,27,38,42],[2,13,21,32,40,44],[6,14,20,28,35,45],
-    [1,10,19,26,34,43],[4,12,23,31,37,41],[5,11,18,25,36,44],
-    [2,9,17,30,39,45],[7,15,22,29,33,42],[1,8,20,27,38,43],
-    [3,13,21,31,35,41],[6,12,19,28,37,44],[4,10,18,26,40,45],
-    [5,14,23,32,36,42],[1,9,17,30,34,43],[3,11,20,28,39,41],
-    [7,16,22,27,35,44],[2,10,19,31,38,45],[4,12,21,26,37,43],
-    [6,15,18,29,40,42],[3,8,23,32,36,41],[5,11,17,25,34,44],
-    [1,13,20,30,39,45],[4,9,22,28,35,43],[7,14,19,27,38,42],
-    [2,12,21,31,37,41],[6,10,18,26,40,44],[3,15,23,29,36,45],
-    [5,11,20,32,34,43],[1,9,17,27,39,42],[4,13,22,30,35,41],
-    [7,16,19,25,38,44],[2,8,21,28,37,45],[6,12,18,31,40,43],
-    [3,10,23,26,36,42],[5,14,20,29,34,41],[1,11,17,32,39,44],
-    [4,9,22,27,35,45],[7,13,19,30,38,43],[2,15,21,28,37,42],
-    [6,10,18,25,40,41],[3,12,23,31,36,44],[5,8,20,26,34,45],
-    [1,14,17,29,39,43],[4,11,22,32,35,42],[7,9,19,27,38,41],
-    [2,13,21,30,37,44],[6,15,18,28,40,45],[3,10,23,25,36,43],
-    [5,12,20,31,34,42],[1,8,17,29,39,41]
-  ];
+  // ── 데이터: 실제 당첨 통계 (1~1204회차, 2002.12 ~ 2025.12) ──
+  // 동행복권 공식 당첨번호 기준 본번호 6개 출현 횟수 (보너스 제외)
+  var TOTAL_ROUNDS = 1204;
+  var FREQ = {1:164,2:151,3:168,4:158,5:151,6:162,7:167,8:154,9:132,10:157,
+              11:163,12:177,13:174,14:169,15:162,16:165,17:166,18:172,19:165,20:166,
+              21:164,22:140,23:144,24:162,25:148,26:162,27:173,28:151,29:152,30:154,
+              31:162,32:141,33:172,34:181,35:159,36:160,37:170,38:164,39:164,40:171,
+              41:145,42:151,43:162,44:159,45:170};
 
-  // ── 빈도 계산 ─────────────────────────────────────────
-  var FREQ = {};
-  for (var n = 1; n <= 45; n++) FREQ[n] = 0;
-  for (var si = 0; si < SAMPLE.length; si++) {
-    for (var ni = 0; ni < SAMPLE[si].length; ni++) {
-      FREQ[SAMPLE[si][ni]]++;
+  // ── 비인기 가중치 (적게 나온 번호일수록 높은 가중치) ──
+  // 당첨 확률은 동일하지만, 남들이 안 고르는 번호라 당첨 시 독식 가능성이 높음
+  var INV_FREQ = {};
+  (function() {
+    var maxW = 0, minW = 99999;
+    for (var i = 1; i <= 45; i++) {
+      if (FREQ[i] > maxW) maxW = FREQ[i];
+      if (FREQ[i] < minW) minW = FREQ[i];
     }
-  }
+    for (var j = 1; j <= 45; j++) {
+      INV_FREQ[j] = (maxW + minW) - FREQ[j]; // 빈도 뒤집기
+    }
+  })();
 
   // ── 가중치 비복원 추출 ─────────────────────────────────
-  function weightedSample(count) {
+  function weightedSample(count, table) {
+    var freqTable = table || FREQ;
     var pool = [];
-    for (var i = 1; i <= 45; i++) pool.push({ num: i, w: FREQ[i] || 1 });
+    for (var i = 1; i <= 45; i++) pool.push({ num: i, w: freqTable[i] || 1 });
 
     var picked = [];
     for (var k = 0; k < count; k++) {
@@ -234,6 +232,8 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
           sets.push(topHeavySample());
         } else if (strategy === "mixed") {
           sets.push(i % 2 === 0 ? weightedSample(6) : topHeavySample());
+        } else if (strategy === "unpopular") {
+          sets.push(weightedSample(6, INV_FREQ));
         } else {
           sets.push(weightedSample(6));
         }
@@ -244,21 +244,22 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
     }
   }
 
-  // ── 빈도 차트 ─────────────────────────────────────────
+  // ── 빈도 차트 (45개 전체, 출현 순) ────────────────────
   function renderFreq() {
     var sorted = [];
     for (var n = 1; n <= 45; n++) sorted.push({ num: n, cnt: FREQ[n] });
     sorted.sort(function(a, b) { return b.cnt - a.cnt; });
-    var top20 = sorted.slice(0, 20);
-    var maxCnt = top20[0].cnt;
+    var maxCnt = sorted[0].cnt;
+    var minCnt = sorted[sorted.length - 1].cnt;
 
     var html = "";
-    for (var i = 0; i < top20.length; i++) {
-      var pct = (top20[i].cnt / maxCnt * 100).toFixed(1);
+    for (var i = 0; i < sorted.length; i++) {
+      var pct = (sorted[i].cnt / maxCnt * 100).toFixed(1);
+      var mark = sorted[i].cnt === maxCnt ? " 최다" : (sorted[i].cnt === minCnt ? " 최소" : "");
       html += '<div class="freq-row">'
-            + '<div class="freq-num">' + top20[i].num + '</div>'
+            + '<div class="freq-num">' + sorted[i].num + '</div>'
             + '<div class="freq-bar-wrap"><div class="freq-bar" style="width:' + pct + '%"></div></div>'
-            + '<div class="freq-cnt">' + top20[i].cnt + '회</div>'
+            + '<div class="freq-cnt">' + sorted[i].cnt + '회' + mark + '</div>'
             + '</div>';
     }
     document.getElementById("freqList").innerHTML = html;
@@ -292,24 +293,26 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
       document.getElementById("tabPredict").addEventListener("click", function() { switchTab("predict"); });
       document.getElementById("tabFreq").addEventListener("click", function() { switchTab("freq"); });
 
-      // 전략 버튼
-      document.getElementById("btnWeighted").addEventListener("click", function() {
-        strategy = "weighted";
-        document.getElementById("btnWeighted").className = "strat-btn active";
-        document.getElementById("btnTopHeavy").className = "strat-btn";
-        document.getElementById("btnMixed").className    = "strat-btn";
-      });
-      document.getElementById("btnTopHeavy").addEventListener("click", function() {
-        strategy = "top_heavy";
-        document.getElementById("btnWeighted").className = "strat-btn";
-        document.getElementById("btnTopHeavy").className = "strat-btn active";
-        document.getElementById("btnMixed").className    = "strat-btn";
-      });
-      document.getElementById("btnMixed").addEventListener("click", function() {
-        strategy = "mixed";
-        document.getElementById("btnWeighted").className = "strat-btn";
-        document.getElementById("btnTopHeavy").className = "strat-btn";
-        document.getElementById("btnMixed").className    = "strat-btn active";
+      // 전략 버튼 (공통 처리)
+      var STRATS = [
+        { id: "btnWeighted", key: "weighted",
+          desc: "많이 나온 번호일수록 뽑힐 확률이 높아집니다." },
+        { id: "btnTopHeavy", key: "top_heavy",
+          desc: "역대 최다 출현 15개 번호에서 4개 + 나머지에서 2개를 뽑습니다." },
+        { id: "btnMixed", key: "mixed",
+          desc: "빈도 가중치와 상위 집중형을 번갈아 사용합니다." },
+        { id: "btnUnpopular", key: "unpopular",
+          desc: "적게 나온 번호일수록 뽑힐 확률이 높아집니다. 당첨 확률은 같지만 남들이 잘 안 고르는 번호라 당첨 시 혼자 받을 가능성이 높아집니다." }
+      ];
+      STRATS.forEach(function(s) {
+        document.getElementById(s.id).addEventListener("click", function() {
+          strategy = s.key;
+          STRATS.forEach(function(o) {
+            document.getElementById(o.id).className =
+              (o.key === s.key) ? "strat-btn active" : "strat-btn";
+          });
+          document.getElementById("stratDesc").textContent = s.desc;
+        });
       });
 
       // 슬라이더
