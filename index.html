@@ -58,6 +58,11 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
 .section{display:none;}
 .section.visible{display:block;}
 .footer{text-align:center;color:var(--sub);font-size:0.72rem;padding:20px 0 10px;}
+.opt-row{display:flex;align-items:center;gap:10px;cursor:pointer;}
+.opt-row input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent);cursor:pointer;}
+.opt-label{font-size:0.9rem;font-weight:600;}
+#notice{background:#2a2a00;color:#ffd54f;border-radius:8px;padding:8px 12px;
+  margin-bottom:10px;font-size:0.75rem;display:none;}
 #errbox{background:#3a0000;color:#ff6b6b;border-radius:8px;padding:10px;
   margin-bottom:10px;font-size:0.8rem;display:none;}
 </style>
@@ -100,7 +105,18 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
     </div>
   </div>
 
+  <div class="card">
+    <label class="opt-row" for="chkNoOverlap">
+      <input type="checkbox" id="chkNoOverlap">
+      <span class="opt-label">조합 간 번호 중복 방지</span>
+    </label>
+    <div style="margin-top:6px;font-size:0.72rem;color:var(--sub);line-height:1.5;">
+      켜면 모든 조합에 같은 번호가 한 번도 안 나옵니다. (최대 7조합까지 가능)
+    </div>
+  </div>
+
   <button class="gen-btn" id="genBtn">&#127922; 번호 생성</button>
+  <div id="notice"></div>
   <div id="results"></div>
 </div>
 
@@ -148,10 +164,14 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
   })();
 
   // ── 가중치 비복원 추출 ─────────────────────────────────
-  function weightedSample(count, table) {
+  // exclude: 뽑으면 안 되는 번호 목록 (조합 간 중복 방지용)
+  function weightedSample(count, table, exclude) {
     var freqTable = table || FREQ;
     var pool = [];
-    for (var i = 1; i <= 45; i++) pool.push({ num: i, w: freqTable[i] || 1 });
+    for (var i = 1; i <= 45; i++) {
+      if (exclude && exclude.indexOf(i) >= 0) continue;
+      pool.push({ num: i, w: freqTable[i] || 1 });
+    }
 
     var picked = [];
     for (var k = 0; k < count; k++) {
@@ -170,9 +190,12 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
   }
 
   // ── 상위 집중형 ───────────────────────────────────────
-  function topHeavySample() {
+  function topHeavySample(exclude) {
     var sorted = [];
-    for (var n = 1; n <= 45; n++) sorted.push({ num: n, cnt: FREQ[n] || 0 });
+    for (var n = 1; n <= 45; n++) {
+      if (exclude && exclude.indexOf(n) >= 0) continue;
+      sorted.push({ num: n, cnt: FREQ[n] || 0 });
+    }
     sorted.sort(function(a, b) { return b.cnt - a.cnt; });
 
     var top = [], rest = [];
@@ -190,7 +213,11 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
       return r;
     }
 
-    var res = pick(top, 4).concat(pick(rest, 2));
+    // 중복 방지로 풀이 줄었을 때: top에서 최대 4개, 부족분은 rest에서
+    var nTop = Math.min(4, top.length);
+    var nRest = 6 - nTop;
+    if (nRest > rest.length) { nTop = 6 - rest.length; nRest = rest.length; }
+    var res = pick(top, nTop).concat(pick(rest, nRest));
     return res.sort(function(a, b) { return a - b; });
   }
 
@@ -226,17 +253,33 @@ input[type=range]{flex:1;accent-color:var(--accent);height:4px;}
   function generate() {
     try {
       var n = parseInt(document.getElementById("countSlider").value, 10) || 5;
+      var noOverlap = document.getElementById("chkNoOverlap").checked;
+      var noticeEl = document.getElementById("notice");
+      noticeEl.style.display = "none";
+
+      // 중복 방지 시 45개 / 6개 = 최대 7조합
+      if (noOverlap && n > 7) {
+        n = 7;
+        noticeEl.textContent = "중복 방지 모드에서는 최대 7조합까지만 생성됩니다. (45개 번호 ÷ 6개)";
+        noticeEl.style.display = "block";
+      }
+
+      var used = [];   // 이미 사용된 번호 (중복 방지 모드에서만 누적)
       var sets = [];
       for (var i = 0; i < n; i++) {
+        var exclude = noOverlap ? used : null;
+        var one;
         if (strategy === "top_heavy") {
-          sets.push(topHeavySample());
+          one = topHeavySample(exclude);
         } else if (strategy === "mixed") {
-          sets.push(i % 2 === 0 ? weightedSample(6) : topHeavySample());
+          one = (i % 2 === 0) ? weightedSample(6, null, exclude) : topHeavySample(exclude);
         } else if (strategy === "unpopular") {
-          sets.push(weightedSample(6, INV_FREQ));
+          one = weightedSample(6, INV_FREQ, exclude);
         } else {
-          sets.push(weightedSample(6));
+          one = weightedSample(6, null, exclude);
         }
+        sets.push(one);
+        if (noOverlap) used = used.concat(one);
       }
       renderResults(sets);
     } catch(e) {
